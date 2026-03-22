@@ -3,6 +3,7 @@ import SwiftUI
 struct RadialProgressView: View {
     let percentage: Double
     let accent: Color
+    var size: CGFloat = 160
 
     var body: some View {
         ZStack {
@@ -19,10 +20,10 @@ struct RadialProgressView: View {
                 .animation(.easeInOut(duration: 0.3), value: percentage)
 
             Text("\(Int((percentage * 100).rounded()))%")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .font(.system(size: size * 0.22, weight: .bold, design: .rounded))
                 .foregroundStyle(accent)
         }
-        .frame(width: 180, height: 180)
+        .frame(width: size, height: size)
     }
 }
 

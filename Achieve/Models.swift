@@ -3,12 +3,12 @@ import Foundation
 struct Habit: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
-    var isCompleted: Bool
+    var completedDayKeys: Set<String>
 
-    init(id: UUID = UUID(), title: String, isCompleted: Bool = false) {
+    init(id: UUID = UUID(), title: String, completedDayKeys: Set<String> = []) {
         self.id = id
         self.title = title
-        self.isCompleted = isCompleted
+        self.completedDayKeys = completedDayKeys
     }
 }
 
@@ -27,12 +27,44 @@ struct Note: Identifiable, Codable, Hashable {
 struct JournalPhoto: Identifiable, Codable, Hashable {
     let id: UUID
     var fileName: String
+    var comment: String
     var createdAt: Date
 
-    init(id: UUID = UUID(), fileName: String, createdAt: Date = Date()) {
+    init(id: UUID = UUID(), fileName: String, comment: String, createdAt: Date = Date()) {
         self.id = id
         self.fileName = fileName
+        self.comment = comment
         self.createdAt = createdAt
+    }
+}
+
+enum AppSection: String, CaseIterable, Codable, Identifiable {
+    case habits
+    case coach
+    case journal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .habits:
+            return "Habits"
+        case .coach:
+            return "AI Coach"
+        case .journal:
+            return "Journal"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .habits:
+            return "target"
+        case .coach:
+            return "sparkles"
+        case .journal:
+            return "book.closed"
+        }
     }
 }
 
@@ -158,6 +190,32 @@ struct LeaderboardEntry: Identifiable, Hashable {
     let score: Int
 }
 
+enum AuthProvider: String, Codable, CaseIterable, Identifiable {
+    case apple
+    case google
+    case email
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .apple:
+            return "Apple"
+        case .google:
+            return "Google"
+        case .email:
+            return "Email"
+        }
+    }
+}
+
+struct UserSession: Codable, Hashable {
+    var provider: AuthProvider
+    var displayName: String
+    var email: String?
+    var createdAt: Date = Date()
+}
+
 struct ExportPayload: Codable {
     let exportedAt: Date
     let accentHex: String
@@ -165,6 +223,6 @@ struct ExportPayload: Codable {
     let notes: [Note]
     let photos: [JournalPhoto]
     let coachMessages: [ChatMessage]
-    let completionHistory: [String: Double]
     let settings: AppSettings
+    let userSession: UserSession?
 }

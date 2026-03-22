@@ -1,35 +1,26 @@
-import PhotosUI
+import AuthenticationServices
 import SwiftUI
 
 struct ProfileView: View {
     @EnvironmentObject private var store: AppStore
 
-    @State private var noteText = ""
-    @State private var selectedItems: [PhotosPickerItem] = []
-    @State private var selectedPhoto: JournalPhoto?
     @State private var isExporting = false
     @State private var exportDocument = ExportJSONDocument(data: Data())
     @State private var exportFileName = "achieve-export.json"
     @State private var showingResetAlert = false
+    @State private var showingEmailSignIn = false
+    @State private var googleDisplayName = "Google User"
     @State private var errorMessage: String?
 
     private let presetColors = ["#3F2A6B", "#E8B923", "#C84B6F", "#10B981", "#1E3A8A"]
-    private let accountCreated = "26/01/2026"
-
-    private var twoColumns: [GridItem] {
-        [GridItem(.flexible()), GridItem(.flexible())]
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 profileHeader
-                dashboard
+                accountSection
                 colorSection
-                notesSection
-                photosSection
                 settingsSection
-                leaderboardSection
                 exportSection
             }
             .padding()
@@ -42,13 +33,6 @@ struct ProfileView: View {
             contentType: .json,
             defaultFilename: exportFileName
         ) { _ in }
-        .onChange(of: selectedItems) { _ in
-            Task { await importSelectedPhotos() }
-        }
-        .fullScreenCover(item: $selectedPhoto) { photo in
-            PhotoZoomSheet(photo: photo)
-                .environmentObject(store)
-        }
         .alert(
             "Error",
             isPresented: Binding(
@@ -70,21 +54,25 @@ struct ProfileView: View {
         } message: {
             Text("This removes habits, notes, chat, and saved photos from this device.")
         }
+        .sheet(isPresented: $showingEmailSignIn) {
+            EmailSignInSheet { name, email in
+                store.signInWithEmail(displayName: name, email: email)
+            }
+        }
     }
 
     private var profileHeader: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             ZStack {
                 Circle()
                     .fill(.ultraThinMaterial)
                     .frame(width: 110, height: 110)
-                Image(systemName: "person.fill")
-                    .font(.system(size: 46))
-                    .foregroundStyle(store.accentColor)
+                Text("🙂")
+                    .font(.system(size: 42))
             }
-            Text("velvetfasion@gmail.com")
-                .font(.headline)
-            Text("Account created: \(accountCreated)")
+            Text(store.profileName)
+                .font(.title3.bold())
+            Text(store.loginStateText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -92,25 +80,64 @@ struct ProfileView: View {
         .padding(.vertical, 8)
     }
 
-    private var dashboard: some View {
-        HStack(spacing: 14) {
-            dashboardCard(value: "\(store.lifetimeFrequencyScore)", title: "Lifetime Frequency")
-            dashboardCard(value: "\(store.streakCount)", title: "Day Streak")
-        }
-    }
-
-    private func dashboardCard(value: String, title: String) -> some View {
+    private var accountSection: some View {
         VStack(spacing: 6) {
-            Text(value)
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundStyle(store.accentColor)
-            Text(title)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if store.isLoggedIn {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Account synced across your devices when iCloud is available.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let email = store.userSession?.email {
+                        Label(email, systemImage: "envelope")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Sign Out", role: .destructive) {
+                        store.signOut()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Sign in to sync habits and journal data.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    SignInWithAppleButton(
+                        onRequest: { request in
+                            request.requestedScopes = [.fullName, .email]
+                        },
+                        onCompletion: { result in
+                            handleAppleSignIn(result: result)
+                        }
+                    )
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 44)
+
+                    Button {
+                        store.signInWithGoogle(displayName: googleDisplayName)
+                    } label: {
+                        Label("Continue with Google", systemImage: "g.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(store.accentColor)
+
+                    Button {
+                        showingEmailSignIn = true
+                    } label: {
+                        Label("Continue with Email", systemImage: "envelope")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
         .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var colorSection: some View {
@@ -145,94 +172,13 @@ struct ProfileView: View {
         }
     }
 
-    private var notesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Notes to Self")
-                .font(.title3.weight(.bold))
-
-            HStack(alignment: .top, spacing: 10) {
-                TextEditor(text: $noteText)
-                    .frame(minHeight: 86)
-                    .padding(8)
-                    .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                Button {
-                    addNote()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(store.accentColor, in: Circle())
-                }
-            }
-
-            Button("Generate empire affirmation") {
-                store.addNote(store.generatedAffirmation())
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(store.accentColor)
-
-            ForEach(store.notes) { note in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(note.text)
-                    Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-    }
-
-    private var photosSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Journal Photos")
-                .font(.title3.weight(.bold))
-
-            PhotosPicker(selection: $selectedItems, maxSelectionCount: 8, matching: .images) {
-                Label("Add full-size photos", systemImage: "photo.on.rectangle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(store.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-
-            if store.photos.isEmpty {
-                Text("No journal photos yet.")
-                    .foregroundStyle(.secondary)
-            } else {
-                LazyVGrid(columns: twoColumns, spacing: 10) {
-                    ForEach(store.photos) { photo in
-                        Button {
-                            selectedPhoto = photo
-                        } label: {
-                            Group {
-                                if let image = store.image(for: photo) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .scaledToFit()
-                                } else {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(.secondarySystemBackground))
-                                        .overlay(Text("Unavailable"))
-                                }
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 180)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
     private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 16) {
+                metricCard(value: "\(store.lifetimeFrequencyScore)%", label: "Lifetime")
+                metricCard(value: "\(store.streakCount)", label: "Streak")
+            }
+
             NavigationLink {
                 SettingsView()
                     .environmentObject(store)
@@ -250,24 +196,18 @@ struct ProfileView: View {
         }
     }
 
-    private var leaderboardSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Anonymous Leaderboard")
-                .font(.title3.weight(.bold))
-
-            ForEach(Array(store.leaderboard.enumerated()), id: \.element.id) { index, entry in
-                HStack {
-                    Text("#\(index + 1)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(store.accentColor)
-                    Text(entry.alias)
-                    Spacer()
-                    Text("\(entry.score)")
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 6)
-            }
+    private func metricCard(value: String, label: String) -> some View {
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.title3.bold())
+                .foregroundStyle(store.accentColor)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var exportSection: some View {
@@ -285,11 +225,6 @@ struct ProfileView: View {
         }
     }
 
-    private func addNote() {
-        store.addNote(noteText)
-        noteText = ""
-    }
-
     private func exportData() {
         do {
             exportDocument = ExportJSONDocument(data: try store.exportData())
@@ -300,49 +235,57 @@ struct ProfileView: View {
         }
     }
 
-    private func importSelectedPhotos() async {
-        guard !selectedItems.isEmpty else { return }
-
-        for item in selectedItems {
-            do {
-                if let data = try await item.loadTransferable(type: Data.self) {
-                    try store.addPhoto(data: data)
-                }
-            } catch {
-                errorMessage = "Could not import a selected photo."
+    private func handleAppleSignIn(result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let auth):
+            guard let credential = auth.credential as? ASAuthorizationAppleIDCredential else {
+                errorMessage = "Apple sign in failed."
+                return
             }
+
+            let formatter = PersonNameComponentsFormatter()
+            let fullName = credential.fullName.flatMap { formatter.string(from: $0) }
+            let displayName = fullName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? fullName!.trimmingCharacters(in: .whitespacesAndNewlines)
+                : "Apple User"
+
+            store.signInWithApple(displayName: displayName, email: credential.email)
+        case .failure:
+            errorMessage = "Apple sign in failed."
         }
-        selectedItems = []
     }
 }
 
-private struct PhotoZoomSheet: View {
-    @EnvironmentObject private var store: AppStore
+private struct EmailSignInSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let photo: JournalPhoto
+    @State private var name = ""
+    @State private var email = ""
+    let onSignIn: (String, String) -> Void
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-
-            if let image = store.image(for: photo) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-            } else {
-                Text("Photo unavailable")
-                    .foregroundStyle(.white)
+        NavigationStack {
+            Form {
+                Section("Email Sign In") {
+                    TextField("Display name", text: $name)
+                    TextField("Email", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                }
             }
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding()
+            .navigationTitle("Email")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Sign In") {
+                        onSignIn(
+                            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Email User" : name,
+                            email.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        dismiss()
+                    }
+                }
             }
         }
     }

@@ -12,6 +12,11 @@ struct AICoachView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            Text("AI Coach")
+                .font(.custom("AvenirNext-Bold", size: 34))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 6)
+
             Picker("Mode", selection: $selectedMode) {
                 ForEach(CoachMode.allCases) { mode in
                     Text(mode.title).tag(mode)
@@ -57,8 +62,8 @@ struct AICoachView: View {
             }
             .padding()
         }
+        .padding(.bottom, 110)
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("AI Coach")
     }
 
     private func bubble(for message: ChatMessage) -> some View {
