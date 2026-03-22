@@ -2,114 +2,247 @@ import SwiftUI
 
 struct AchieveView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var newHabit = ""
+    @State private var selectedDay = Calendar.current.startOfDay(for: Date())
+    @State private var editingHabit: Habit?
+    @State private var editingTitle = ""
+    @State private var showingAddHabit = false
+    @State private var newHabitTitle = ""
+    @State private var editMode: EditMode = .inactive
 
-    private let background = Color(hex: "#F8F4EB")
-    private let suggestionColumns = [GridItem(.adaptive(minimum: 130), spacing: 8)]
+    private var weekDays: [Date] {
+        store.weekDays(reference: Date())
+    }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    RadialProgressView(percentage: store.completionRate, accent: store.accentColor)
-                        .padding(.top, 8)
+        ScrollView {
+            VStack(spacing: 18) {
+                Text("Achieve")
+                    .font(.custom("AvenirNext-Bold", size: 34))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 6)
 
-                    Text("Achieve")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundStyle(store.accentColor)
+                RadialProgressView(percentage: store.progress(for: selectedDay), accent: store.accentColor, size: 130)
 
-                    if store.habits.isEmpty {
-                        VStack(spacing: 8) {
-                            Text("Add your first habit")
-                                .font(.system(size: 27, weight: .bold, design: .rounded))
-                            Text("This is where your high frequency lives")
-                                .font(.body)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+                Text("Goals for \(dayTitle(for: selectedDay)): \(Int((store.progress(for: selectedDay) * 100).rounded()))%")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(store.accentColor)
+                    .multilineTextAlignment(.center)
+
+                weekdayProgressStrip
+
+                VStack(spacing: 10) {
+                    HStack(alignment: .bottom) {
+                        Text("Dream ✨")
+                            .font(.title3.bold())
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        dayActionHeader
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button(editMode == .active ? "Done" : "Reorder") {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                editMode = editMode == .active ? .inactive : .active
+                            }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
-                    } else {
-                        VStack(spacing: 12) {
-                            ForEach(store.habits) { habit in
+                        .font(.footnote.weight(.semibold))
+                    }
+
+                    List {
+                        ForEach(store.habits) { habit in
+                            HStack(spacing: 8) {
                                 Button {
-                                    store.toggleHabit(habit)
+                                    editingHabit = habit
+                                    editingTitle = habit.title
                                 } label: {
-                                    HStack(spacing: 14) {
-                                        Circle()
-                                            .fill(habit.completed ? store.accentColor : Color.gray.opacity(0.3))
-                                            .frame(width: 28, height: 28)
-
+                                    HStack {
                                         Text(habit.title)
-                                            .font(.body)
-                                            .strikethrough(habit.completed)
-                                            .foregroundStyle(.primary)
-
+                                            .lineLimit(1)
                                         Spacer()
                                     }
-                                    .padding(16)
-                                    .background(.white, in: RoundedRectangle(cornerRadius: 16))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+                                    )
                                 }
                                 .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Button {
+                                    store.toggleHabit(habit, on: selectedDay)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: store.isHabitCompleted(habit, on: selectedDay) ? "checkmark.circle.fill" : "circle")
+                                        Text(store.isHabitCompleted(habit, on: selectedDay) ? "Done" : "Tap")
+                                        Spacer()
+                                    }
+                                    .foregroundStyle(store.isHabitCompleted(habit, on: selectedDay) ? store.accentColor : .secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                                }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                    }
+                        .onMove(perform: store.moveHabits)
 
-                    HStack(spacing: 12) {
-                        TextField("New habit...", text: $newHabit)
-                            .textFieldStyle(.plain)
-                            .padding(16)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                            .submitLabel(.done)
-                            .onSubmit {
-                                store.addHabit(newHabit)
-                                newHabit = ""
-                            }
-
-                        Button {
-                            store.addHabit(newHabit)
-                            newHabit = ""
-                        } label: {
-                            Text("+")
-                                .font(.system(size: 30, weight: .medium))
-                                .foregroundStyle(.white)
-                                .frame(width: 56, height: 56)
-                                .background(store.accentColor, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.top, 4)
-
-                    LazyVGrid(columns: suggestionColumns, alignment: .leading, spacing: 8) {
-                        ForEach(store.habitSuggestions, id: \.self) { suggestion in
+                        HStack {
                             Button {
-                                store.addHabit(suggestion)
+                                showingAddHabit = true
                             } label: {
-                                Text(suggestion)
-                                    .font(.callout)
+                                Text("Add Habit")
+                                    .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(store.accentColor)
                                     .padding(.horizontal, 14)
-                                    .padding(.vertical, 9)
-                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 10)
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(store.accentColor, lineWidth: 1)
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(store.accentColor.opacity(0.75), lineWidth: 1)
                                     )
                             }
                             .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Spacer()
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(minHeight: CGFloat(max(300, store.habits.count * 62)))
+                    .listStyle(.plain)
+                    .scrollDisabled(true)
+                    .environment(\.editMode, $editMode)
+                }
+            }
+            .padding()
+            .padding(.bottom, 120)
+        }
+        .onAppear {
+            selectedDay = Calendar.current.startOfDay(for: Date())
+        }
+        .background(Color(.systemGroupedBackground))
+        .sheet(item: $editingHabit) { habit in
+            NavigationStack {
+                Form {
+                    Section("Edit Habit") {
+                        TextField("Habit title", text: $editingTitle)
+                    }
+                }
+                .navigationTitle("Edit")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel") {
+                            editingHabit = nil
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Save") {
+                            store.updateHabitTitle(id: habit.id, title: editingTitle)
+                            editingHabit = nil
                         }
                     }
                 }
-                .padding(20)
             }
-            .background(background.ignoresSafeArea())
-            .navigationTitle("Today's Frequency")
-            .navigationBarTitleDisplayMode(.inline)
+        }
+        .alert("Add Habit", isPresented: $showingAddHabit) {
+            TextField("Habit name", text: $newHabitTitle)
+            Button("Cancel", role: .cancel) {
+                newHabitTitle = ""
+            }
+            Button("Add") {
+                store.addHabit(newHabitTitle)
+                newHabitTitle = ""
+            }
+        } message: {
+            Text("Create your next Dream habit.")
+        }
+    }
+
+    private var weekdayProgressStrip: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            ForEach(weekDays, id: \.self) { day in
+                Button {
+                    selectedDay = Calendar.current.startOfDay(for: day)
+                } label: {
+                    VStack(spacing: 7) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.secondary.opacity(0.18))
+                            .frame(width: 18, height: 56)
+                            .overlay(alignment: .bottom) {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(store.accentColor)
+                                    .frame(width: 18, height: 56 * store.progress(for: day))
+                            }
+
+                        Text(shortDayName(for: day))
+                            .font(dayFont(for: day))
+                            .foregroundStyle(dayColor(for: day))
+                            .underline(isSelectedDay(day))
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var dayActionHeader: some View {
+        let title = dayTitle(for: selectedDay)
+        return Button {
+            let today = Calendar.current.startOfDay(for: Date())
+            if !Calendar.current.isDate(selectedDay, inSameDayAs: today) {
+                selectedDay = today
+            }
+        } label: {
+            Text("🗓️ \(title)")
+                .font(.headline)
+                .foregroundStyle(store.accentColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func shortDayName(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: date)
+    }
+
+    private func dayTitle(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEEE"
+        return formatter.string(from: date)
+    }
+
+    private func isSelectedDay(_ date: Date) -> Bool {
+        Calendar.current.isDate(date, inSameDayAs: selectedDay)
+    }
+
+    private func dayColor(for date: Date) -> Color {
+        if Calendar.current.isDateInToday(date) {
+            return store.accentColor
+        }
+        return isSelectedDay(date) ? .primary : .gray
+    }
+
+    private func dayFont(for date: Date) -> Font {
+        isSelectedDay(date) ? .subheadline.bold() : .subheadline
+    }
+}
+
+private struct AchieveHeaderPreviewWrapper: View {
+    var body: some View {
+        NavigationStack {
+            AchieveView()
+                .environmentObject(AppStore.preview)
         }
     }
 }
 
 #Preview {
-    AchieveView()
-        .environmentObject(AppStore.preview)
+    AchieveHeaderPreviewWrapper()
 }

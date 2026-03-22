@@ -1,355 +1,299 @@
-import PhotosUI
+import AuthenticationServices
 import SwiftUI
-import UIKit
 
 struct ProfileView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var newNote = ""
-    @State private var showColorPicker = false
-    @State private var customAccentColor = Color(hex: "#3F2A6B")
-    @State private var selectedPickerItem: PhotosPickerItem?
-    @State private var selectedPhoto: JournalPhoto?
-    @State private var showingResetAlert = false
 
-    private let gridColumns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
+    @State private var isExporting = false
+    @State private var exportDocument = ExportJSONDocument(data: Data())
+    @State private var exportFileName = "achieve-export.json"
+    @State private var showingResetAlert = false
+    @State private var showingEmailSignIn = false
+    @State private var googleDisplayName = "Google User"
+    @State private var errorMessage: String?
+
+    private let presetColors = ["#3F2A6B", "#E8B923", "#C84B6F", "#10B981", "#1E3A8A"]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    profileHeader
-                    dashboardSection
-                    colorSection
-                    notesSection
-                    journalSection
-                    settingsSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                profileHeader
+                accountSection
+                colorSection
+                settingsSection
+                exportSection
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Profile")
+        .fileExporter(
+            isPresented: $isExporting,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: exportFileName
+        ) { _ in }
+        .alert(
+            "Error",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { presenting in
+                    if !presenting { errorMessage = nil }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+            )
+        ) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .alert("Delete all data?", isPresented: $showingResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                store.resetAllData()
             }
-            .background(Color(hex: "#F8F4EB").ignoresSafeArea())
-            .navigationTitle("Profile")
-            .alert("Reset all local data?", isPresented: $showingResetAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) { store.resetAllData() }
-            } message: {
-                Text("This clears habits, notes, photos, coach messages, and settings from this device.")
-            }
-            .onAppear { customAccentColor = store.accentColor }
-            .fullScreenCover(item: $selectedPhoto) { photo in
-                PhotoZoomView(url: store.photoURL(for: photo))
+        } message: {
+            Text("This removes habits, notes, chat, and saved photos from this device.")
+        }
+        .sheet(isPresented: $showingEmailSignIn) {
+            EmailSignInSheet { name, email in
+                store.signInWithEmail(displayName: name, email: email)
             }
         }
     }
 
     private var profileHeader: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             ZStack {
                 Circle()
                     .fill(.ultraThinMaterial)
-                    .frame(width: 122, height: 122)
-
-                Text("👤")
-                    .font(.system(size: 62))
-                    .foregroundStyle(store.accentColor)
+                    .frame(width: 110, height: 110)
+                Text("🙂")
+                    .font(.system(size: 42))
             }
-
-            Text("velvetfasion@gmail.com")
-                .font(.headline)
-            Text("Account created: 26/01/2026")
-                .font(.subheadline)
+            Text(store.profileName)
+                .font(.title3.bold())
+            Text(store.loginStateText)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 8)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
-    private var dashboardSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Empire Dashboard")
-            HStack(spacing: 12) {
-                statCard(value: "\(store.lifetimeFrequencyScore)", label: "Lifetime Frequency")
-                statCard(value: "\(store.settings.currentStreak)", label: "Day Streak 🔥")
+    private var accountSection: some View {
+        VStack(spacing: 6) {
+            if store.isLoggedIn {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Account synced across your devices when iCloud is available.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let email = store.userSession?.email {
+                        Label(email, systemImage: "envelope")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Sign Out", role: .destructive) {
+                        store.signOut()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Sign in to sync habits and journal data.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    SignInWithAppleButton(
+                        onRequest: { request in
+                            request.requestedScopes = [.fullName, .email]
+                        },
+                        onCompletion: { result in
+                            handleAppleSignIn(result: result)
+                        }
+                    )
+                    .signInWithAppleButtonStyle(.black)
+                    .frame(height: 44)
+
+                    Button {
+                        store.signInWithGoogle(displayName: googleDisplayName)
+                    } label: {
+                        Label("Continue with Google", systemImage: "g.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(store.accentColor)
+
+                    Button {
+                        showingEmailSignIn = true
+                    } label: {
+                        Label("Continue with Email", systemImage: "envelope")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         }
+        .padding()
+        .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var colorSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation { showColorPicker.toggle() }
-            } label: {
-                Text("Change Empire Color")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(store.accentColor, in: RoundedRectangle(cornerRadius: 16))
-            }
-            .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Empire Color")
+                .font(.title3.weight(.bold))
 
-            if showColorPicker {
-                VStack(alignment: .leading, spacing: 12) {
-                    LazyVGrid(columns: gridColumns, spacing: 12) {
-                        ForEach(store.accentPresets, id: \.self) { hex in
-                            Button {
-                                store.accentHex = hex
-                                customAccentColor = Color(hex: hex)
-                            } label: {
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color(hex: hex))
-                                    .frame(height: 50)
-                                    .overlay {
-                                        if store.accentHex.lowercased() == hex.lowercased() {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .font(.title2)
-                                                .foregroundStyle(.white)
-                                        }
-                                    }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    ColorPicker("Full Accent Picker", selection: $customAccentColor, supportsOpacity: false)
-                        .onChange(of: customAccentColor) { newColor in
-                            store.accentHex = UIColor(newColor).toHexString()
-                        }
-                }
-                .padding(14)
-                .background(.white, in: RoundedRectangle(cornerRadius: 16))
-            }
-        }
-    }
-
-    private var notesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Notes to Self")
-
-            HStack(alignment: .top, spacing: 12) {
-                TextField("Write your affirmation or reflection...", text: $newNote, axis: .vertical)
-                    .padding(14)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                    .lineLimit(3...8)
-
-                Button {
-                    store.addNote(newNote)
-                    newNote = ""
-                } label: {
-                    Text("+")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, height: 54)
-                        .background(store.accentColor, in: Circle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            ForEach(store.notes) { note in
-                Text(note.text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 16))
-            }
-        }
-    }
-
-    private var journalSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Journal Photos (full size)")
-
-            PhotosPicker(selection: $selectedPickerItem, matching: .images) {
-                Text("Add full-size photo")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(store.accentColor, in: RoundedRectangle(cornerRadius: 16))
-            }
-            .onChange(of: selectedPickerItem) { item in
-                guard let item else { return }
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        store.addPhotoData(data)
-                    }
-                    selectedPickerItem = nil
-                }
-            }
-
-            LazyVGrid(columns: gridColumns, spacing: 12) {
-                ForEach(store.journalPhotos) { photo in
+            HStack {
+                ForEach(presetColors, id: \.self) { hex in
                     Button {
-                        selectedPhoto = photo
+                        store.accentHex = hex
                     } label: {
-                        PhotoThumbnailView(url: store.photoURL(for: photo))
+                        Circle()
+                            .fill(Color(hex: hex))
+                            .frame(width: 38, height: 38)
+                            .overlay(
+                                Circle()
+                                    .stroke(store.accentHex == hex ? Color.primary : .clear, lineWidth: 2)
+                            )
                     }
                     .buttonStyle(.plain)
                 }
             }
+
+            ColorPicker("Custom Accent", selection: Binding(
+                get: { store.accentColor },
+                set: { color in
+                    let uiColor = UIColor(color)
+                    store.accentHex = uiColor.toHexString() ?? "#3F2A6B"
+                }
+            ))
         }
     }
 
     private var settingsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("Settings")
-
-            VStack(spacing: 12) {
-                settingsPicker(
-                    title: "Reminder frequency",
-                    selection: $store.settings.reminderFrequency,
-                    options: ReminderFrequency.allCases
-                )
-                settingsPicker(
-                    title: "Notification style",
-                    selection: $store.settings.notificationStyle,
-                    options: NotificationStyle.allCases
-                )
-                settingsPicker(
-                    title: "Export format",
-                    selection: $store.settings.exportFormat,
-                    options: ExportFormat.allCases
-                )
-
-                Stepper("Streak counter: \(store.settings.currentStreak) days", value: $store.settings.currentStreak, in: 0...999)
-                    .font(.subheadline)
-
-                Button(role: .destructive) {
-                    showingResetAlert = true
-                } label: {
-                    Text("Reset all local data")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(14)
-            .background(.white, in: RoundedRectangle(cornerRadius: 16))
-        }
-    }
-
-    private func settingsPicker<T: Hashable & Identifiable & RawRepresentable>(
-        title: String,
-        selection: Binding<T>,
-        options: [T]
-    ) -> some View where T.RawValue == String {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Picker(title, selection: selection) {
-                ForEach(options) { option in
-                    Text(option.rawValue).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-
-    private func sectionTitle(_ value: String) -> some View {
-        Text(value)
-            .font(.system(size: 24, weight: .bold, design: .rounded))
-            .foregroundStyle(store.accentColor)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func statCard(value: String, label: String) -> some View {
-        VStack(spacing: 6) {
-            Text(value)
-                .font(.system(size: 42, weight: .bold, design: .rounded))
-                .foregroundStyle(store.accentColor)
-            Text(label)
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 130)
-        .background(.white, in: RoundedRectangle(cornerRadius: 18))
-    }
-}
-
-private struct PhotoThumbnailView: View {
-    let url: URL
-
-    var body: some View {
-        Group {
-            if let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.gray.opacity(0.15))
-                    .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
-                    }
-            }
-        }
-        .frame(height: 180)
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-private struct PhotoZoomView: View {
-    @Environment(\.dismiss) private var dismiss
-    let url: URL
-    @State private var zoom: CGFloat = 1
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-
-            if let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .scaleEffect(zoom)
-                    .gesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                zoom = max(1, min(value, 4))
-                            }
-                    )
-                    .onTapGesture {
-                        dismiss()
-                    }
-            } else {
-                Text("Image unavailable")
-                    .foregroundStyle(.white)
+            HStack(spacing: 16) {
+                metricCard(value: "\(store.lifetimeFrequencyScore)%", label: "Lifetime")
+                metricCard(value: "\(store.streakCount)", label: "Streak")
             }
 
-            Button {
-                dismiss()
+            NavigationLink {
+                SettingsView()
+                    .environmentObject(store)
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.white)
-                    .padding(20)
+                HStack {
+                    Text("Open Settings")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .background(.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
         }
     }
+
+    private func metricCard(value: String, label: String) -> some View {
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.title3.bold())
+                .foregroundStyle(store.accentColor)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var exportSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button("Export My Data") {
+                exportData()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(store.accentColor)
+
+            Button("Sign out / delete local data", role: .destructive) {
+                showingResetAlert = true
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func exportData() {
+        do {
+            exportDocument = ExportJSONDocument(data: try store.exportData())
+            exportFileName = "achieve-export-\(Date.now.formatted(date: .numeric, time: .omitted).replacingOccurrences(of: "/", with: "-")).json"
+            isExporting = true
+        } catch {
+            errorMessage = "Could not prepare export: \(error.localizedDescription)"
+        }
+    }
+
+    private func handleAppleSignIn(result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let auth):
+            guard let credential = auth.credential as? ASAuthorizationAppleIDCredential else {
+                errorMessage = "Apple sign in failed."
+                return
+            }
+
+            let formatter = PersonNameComponentsFormatter()
+            let fullName = credential.fullName.flatMap { formatter.string(from: $0) }
+            let displayName = fullName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? fullName!.trimmingCharacters(in: .whitespacesAndNewlines)
+                : "Apple User"
+
+            store.signInWithApple(displayName: displayName, email: credential.email)
+        case .failure:
+            errorMessage = "Apple sign in failed."
+        }
+    }
 }
 
-private extension UIColor {
-    func toHexString() -> String {
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
-            return "#3F2A6B"
+private struct EmailSignInSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var email = ""
+    let onSignIn: (String, String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Email Sign In") {
+                    TextField("Display name", text: $name)
+                    TextField("Email", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                }
+            }
+            .navigationTitle("Email")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Sign In") {
+                        onSignIn(
+                            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Email User" : name,
+                            email.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        dismiss()
+                    }
+                }
+            }
         }
-        let r = Int(red * 255)
-        let g = Int(green * 255)
-        let b = Int(blue * 255)
-        return String(format: "#%02X%02X%02X", r, g, b)
     }
 }
 
 #Preview {
-    ProfileView()
-        .environmentObject(AppStore.preview)
+    NavigationStack {
+        ProfileView()
+            .environmentObject(AppStore.preview)
+    }
 }

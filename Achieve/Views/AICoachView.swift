@@ -2,98 +2,118 @@ import SwiftUI
 
 struct AICoachView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var selectedMode: CoachMode = .motivation
     @State private var input = ""
-    @State private var isReplying = false
+    @State private var isSending = false
+
+    private var modeMessages: [ChatMessage] {
+        store.messages(for: selectedMode)
+    }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                Picker("Mode", selection: $store.selectedCoachMode) {
-                    ForEach(CoachMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
+        VStack(spacing: 12) {
+            Text("AI Coach")
+                .font(.custom("AvenirNext-Bold", size: 34))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 6)
+
+            Picker("Mode", selection: $selectedMode) {
+                ForEach(CoachMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(store.coachMessages) { message in
-                                HStack {
-                                    if message.isUser { Spacer() }
-                                    Text(message.text)
-                                        .foregroundStyle(message.isUser ? .white : .primary)
-                                        .padding(12)
-                                        .background(message.isUser ? store.accentColor : Color(.systemGray6))
-                                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                                        .frame(maxWidth: 300, alignment: message.isUser ? .trailing : .leading)
-                                    if !message.isUser { Spacer() }
-                                }
-                                .id(message.id)
-                            }
-
-                            if isReplying {
-                                HStack {
-                                    ProgressView()
-                                        .padding(12)
-                                        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 16))
-                                    Spacer()
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                    }
-                    .onChange(of: store.coachMessages.count) { _ in
-                        if let last = store.coachMessages.last?.id {
-                            withAnimation {
-                                proxy.scrollTo(last, anchor: .bottom)
-                            }
-                        }
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    TextField("Ask anything...", text: $input, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
-                        .submitLabel(.send)
-                        .onSubmit(sendMessage)
-
-                    Button(action: sendMessage) {
-                        Image(systemName: "arrow.up")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(store.accentColor, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 6)
             }
-            .navigationTitle("AI Coach")
-            .background(Color(hex: "#F8F4EB").ignoresSafeArea())
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(modeMessages) { message in
+                            bubble(for: message)
+                                .id(message.id)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                }
+                .onAppear {
+                    scrollToBottom(proxy: proxy)
+                }
+                .onChange(of: modeMessages.count) { _ in
+                    scrollToBottom(proxy: proxy)
+                }
+            }
+
+            HStack(spacing: 10) {
+                TextField("Ask anything...", text: $input, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+
+                Button(action: send) {
+                    Image(systemName: isSending ? "hourglass" : "arrow.up")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(store.accentColor, in: Circle())
+                }
+                .disabled(isSending)
+            }
+            .padding()
+        }
+        .padding(.bottom, 110)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private func bubble(for message: ChatMessage) -> some View {
+        HStack {
+            if message.role == .assistant {
+                textBubble(message.text, isUser: false)
+                Spacer(minLength: 40)
+            } else {
+                Spacer(minLength: 40)
+                textBubble(message.text, isUser: true)
+            }
         }
     }
 
-    private func sendMessage() {
-        guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let mode = store.selectedCoachMode
-        store.addUserMessage(input, mode: mode)
+    private func textBubble(_ text: String, isUser: Bool) -> some View {
+        Text(text)
+            .padding(12)
+            .foregroundStyle(isUser ? .white : .primary)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(isUser ? store.accentColor : Color(.secondarySystemBackground))
+            )
+            .frame(maxWidth: 280, alignment: isUser ? .trailing : .leading)
+    }
+
+    private func send() {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSending else { return }
         input = ""
-        isReplying = true
+        isSending = true
 
         Task {
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            store.addCoachReply(for: mode)
-            isReplying = false
+            await store.sendCoachMessage(trimmed, mode: selectedMode)
+            await MainActor.run {
+                isSending = false
+            }
+        }
+    }
+
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        guard let last = modeMessages.last else { return }
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 }
 
 #Preview {
-    AICoachView()
-        .environmentObject(AppStore.preview)
+    NavigationStack {
+        AICoachView()
+            .environmentObject(AppStore.preview)
+    }
 }
