@@ -1,5 +1,118 @@
 import Foundation
 
+// MARK: - Calendar Models
+
+enum EventCategory: String, CaseIterable, Codable, Identifiable {
+    case work, plan, growth, personal, health, learning, rest
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .work:     return "WORK"
+        case .plan:     return "PLAN"
+        case .growth:   return "GROWTH"
+        case .personal: return "PERSONAL"
+        case .health:   return "HEALTH"
+        case .learning: return "LEARNING"
+        case .rest:     return "REST"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .work:     return "♦"
+        case .plan:     return "◆"
+        case .growth:   return "✦"
+        case .personal: return "⊙"
+        case .health:   return "○"
+        case .learning: return "◇"
+        case .rest:     return "◌"
+        }
+    }
+
+    var sfSymbol: String {
+        switch self {
+        case .work:     return "briefcase.fill"
+        case .plan:     return "list.bullet.clipboard.fill"
+        case .growth:   return "chart.line.uptrend.xyaxis"
+        case .personal: return "person.fill"
+        case .health:   return "heart.fill"
+        case .learning: return "book.fill"
+        case .rest:     return "moon.fill"
+        }
+    }
+}
+
+enum EventDuration: String, CaseIterable, Codable, Identifiable {
+    case halfHour    = "30m"
+    case oneHour     = "1h"
+    case oneHalfHour = "1.5h"
+    case twoHours    = "2h"
+    case threeHours  = "3h"
+    case allDay      = "All Day"
+
+    var id: String { rawValue }
+
+    var minutes: Int {
+        switch self {
+        case .halfHour:    return 30
+        case .oneHour:     return 60
+        case .oneHalfHour: return 90
+        case .twoHours:    return 120
+        case .threeHours:  return 180
+        case .allDay:      return 1440
+        }
+    }
+}
+
+struct CalendarEvent: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    var date: Date
+    var startHour: Int
+    var startMinute: Int
+    var duration: EventDuration
+    var category: EventCategory
+    var isImportant: Bool
+    var isPinned: Bool
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        date: Date = Date(),
+        startHour: Int = 9,
+        startMinute: Int = 0,
+        duration: EventDuration = .oneHour,
+        category: EventCategory = .work,
+        isImportant: Bool = false,
+        isPinned: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.date = Calendar.current.startOfDay(for: date)
+        self.startHour = startHour
+        self.startMinute = startMinute
+        self.duration = duration
+        self.category = category
+        self.isImportant = isImportant
+        self.isPinned = isPinned
+    }
+
+    var startDate: Date {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        comps.hour = startHour
+        comps.minute = startMinute
+        return Calendar.current.date(from: comps) ?? date
+    }
+
+    var notificationFireDate: Date {
+        startDate.addingTimeInterval(-3600)
+    }
+}
+
+// MARK: - Habits
+
 struct Habit: Identifiable, Codable, Hashable {
     let id: UUID
     var title: String
@@ -42,31 +155,32 @@ enum AppSection: String, CaseIterable, Codable, Identifiable {
     case habits
     case coach
     case journal
+    case calendar
+    case profile
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .habits:
-            return "Habits"
-        case .coach:
-            return "AI Coach"
-        case .journal:
-            return "Journal"
+        case .habits:   return "Habits"
+        case .coach:    return "AI Coach"
+        case .journal:  return "Journal"
+        case .calendar: return "Schedule"
+        case .profile:  return "Profile"
         }
     }
 
     var icon: String {
         switch self {
-        case .habits:
-            return "target"
-        case .coach:
-            return "sparkles"
-        case .journal:
-            return "book.closed"
+        case .habits:   return "target"
+        case .coach:    return "sparkles"
+        case .journal:  return "book.closed"
+        case .calendar: return "calendar"
+        case .profile:  return "person.fill"
         }
     }
 }
+
 
 enum CoachRole: String, Codable, Hashable {
     case user
@@ -223,6 +337,7 @@ struct ExportPayload: Codable {
     let notes: [Note]
     let photos: [JournalPhoto]
     let coachMessages: [ChatMessage]
+    let calendarEvents: [CalendarEvent]
     let settings: AppSettings
     let userSession: UserSession?
 }

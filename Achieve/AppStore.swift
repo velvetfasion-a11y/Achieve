@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -8,6 +9,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var notes: [Note] = []
     @Published private(set) var photos: [JournalPhoto] = []
     @Published private(set) var coachMessages: [ChatMessage] = []
+    @Published private(set) var calendarEvents: [CalendarEvent] = []
     @Published var userSession: UserSession? {
         didSet {
             save(userSession, key: Keys.userSession)
@@ -149,10 +151,88 @@ final class AppStore: ObservableObject {
         persistHabits()
     }
 
+    // MARK: - Calendar Events
+
+    func addEvent(_ event: CalendarEvent) {
+        calendarEvents.append(event)
+        persistEvents()
+        scheduleNotification(for: event)
+    }
+
+    func updateEvent(_ event: CalendarEvent) {
+        guard let index = calendarEvents.firstIndex(where: { $0.id == event.id }) else { return }
+        cancelNotification(for: calendarEvents[index])
+        calendarEvents[index] = event
+        persistEvents()
+        scheduleNotification(for: event)
+    }
+
+    func deleteEvent(_ event: CalendarEvent) {
+        cancelNotification(for: event)
+        calendarEvents.removeAll { $0.id == event.id }
+        persistEvents()
+    }
+
+    func eventsFor(date: Date) -> [CalendarEvent] {
+        let key = dayKey(for: date)
+        return calendarEvents
+            .filter { dayKey(for: $0.date) == key }
+            .sorted {
+                if $0.startHour != $1.startHour { return $0.startHour < $1.startHour }
+                return $0.startMinute < $1.startMinute
+            }
+    }
+
+    func eventsFor(month: Int, year: Int) -> [CalendarEvent] {
+        calendarEvents.filter { event in
+            let comps = calendar.dateComponents([.month, .year], from: event.date)
+            return comps.month == month && comps.year == year
+        }
+    }
+
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    func scheduleNotification(for event: CalendarEvent) {
+        guard event.duration != .allDay else { return }
+        let fireDate = event.notificationFireDate
+        guard fireDate > Date() else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Upcoming: \(event.title)"
+        content.body = "\(event.category.title) starts in 1 hour"
+        content.sound = .default
+        content.categoryIdentifier = "CALENDAR_EVENT"
+        content.userInfo = ["eventID": event.id.uuidString]
+
+        let triggerComps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: triggerComps, repeats: false)
+        let request = UNNotificationRequest(identifier: "event-\(event.id.uuidString)", content: content, trigger: trigger)
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
+    func cancelNotification(for event: CalendarEvent) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: ["event-\(event.id.uuidString)"]
+        )
+        UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
+            let snoozeIDs = requests
+                .filter { $0.identifier.hasPrefix("event-snooze-\(event.id.uuidString)-") }
+                .map { $0.identifier }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: snoozeIDs)
+        }
+    }
+
     func addNote(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         notes.insert(Note(text: trimmed), at: 0)
+        save(notes, key: Keys.notes)
+    }
+
+    func deleteNote(_ note: Note) {
+        notes.removeAll { $0.id == note.id }
         save(notes, key: Keys.notes)
     }
 
@@ -202,6 +282,7 @@ final class AppStore: ObservableObject {
             notes: notes,
             photos: photos,
             coachMessages: coachMessages,
+            calendarEvents: calendarEvents,
             settings: settings,
             userSession: userSession
         )
@@ -218,6 +299,7 @@ final class AppStore: ObservableObject {
         photos.forEach { try? FileManager.default.removeItem(at: photoURL(for: $0)) }
         photos = []
         coachMessages = []
+        calendarEvents = []
         accentHex = "#3F2A6B"
         settings = .init()
         userSession = nil
@@ -226,6 +308,7 @@ final class AppStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Keys.notes)
         UserDefaults.standard.removeObject(forKey: Keys.photos)
         UserDefaults.standard.removeObject(forKey: Keys.coachMessages)
+        UserDefaults.standard.removeObject(forKey: Keys.calendarEvents)
         UserDefaults.standard.removeObject(forKey: Keys.accentHex)
         UserDefaults.standard.removeObject(forKey: Keys.settings)
         UserDefaults.standard.removeObject(forKey: Keys.userSession)
@@ -275,6 +358,9 @@ final class AppStore: ObservableObject {
         if let savedSettings: AppSettings = load(key: Keys.settings, as: AppSettings.self) {
             settings = savedSettings
         }
+        if let savedEvents: [CalendarEvent] = load(key: Keys.calendarEvents, as: [CalendarEvent].self) {
+            calendarEvents = savedEvents
+        }
 
         if UserDefaults.standard.object(forKey: Keys.habits) == nil {
             habits = [Habit(title: "Drink water")]
@@ -284,6 +370,10 @@ final class AppStore: ObservableObject {
 
     private func persistHabits() {
         save(habits, key: Keys.habits)
+    }
+
+    private func persistEvents() {
+        save(calendarEvents, key: Keys.calendarEvents)
     }
 
     private func ensureCoachGreeting() {
@@ -382,6 +472,7 @@ final class AppStore: ObservableObject {
         save(habits, key: Keys.habits)
         save(notes, key: Keys.notes)
         save(coachMessages, key: Keys.coachMessages)
+        save(calendarEvents, key: Keys.calendarEvents)
         save(accentHex, key: Keys.accentHex)
         save(settings, key: Keys.settings)
         save(userSession, key: Keys.userSession)
@@ -406,6 +497,9 @@ final class AppStore: ObservableObject {
         }
         if let cloudSettings: AppSettings = loadFromCloud(key: Keys.settings, as: AppSettings.self) {
             settings = cloudSettings
+        }
+        if let cloudEvents: [CalendarEvent] = loadFromCloud(key: Keys.calendarEvents, as: [CalendarEvent].self) {
+            calendarEvents = cloudEvents
         }
     }
 
@@ -456,6 +550,12 @@ final class AppStore: ObservableObject {
             .init(role: .user, mode: .motivation, text: "I feel behind."),
             .init(role: .assistant, mode: .motivation, text: "Then shrink the day to one meaningful action.")
         ]
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+        calendarEvents = [
+            CalendarEvent(title: "Team Standup", date: Date(), startHour: 9, startMinute: 0, duration: .halfHour, category: .work, isImportant: true),
+            CalendarEvent(title: "Deep Work Block", date: Date(), startHour: 10, startMinute: 0, duration: .twoHours, category: .growth),
+            CalendarEvent(title: "Gym Session", date: tomorrow, startHour: 7, startMinute: 0, duration: .oneHour, category: .health, isPinned: true)
+        ]
     }
 
     private enum Keys {
@@ -463,6 +563,7 @@ final class AppStore: ObservableObject {
         static let notes = "achieve.notes"
         static let photos = "achieve.photos"
         static let coachMessages = "achieve.coachMessages"
+        static let calendarEvents = "achieve.calendarEvents"
         static let accentHex = "achieve.accentHex"
         static let settings = "achieve.settings"
         static let userSession = "achieve.userSession"
