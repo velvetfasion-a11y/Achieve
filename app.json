@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Achieve",
+    "slug": "achieve",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.achieve.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Achieve needs access to your photos so you can journal high-frequency moments.",
+        "NSPhotoLibraryAddUsageDescription": "Achieve can save exported journal content to your device."
+      }
+    },
+    "android": {
+      "package": "com.achieve.app"
+    },
+    "plugins": [
+      "expo-image-picker"
+    ]
+  }
+}
